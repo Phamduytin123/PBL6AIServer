@@ -1,7 +1,5 @@
 from flask import Flask, request, jsonify
 from PIL import Image  # Để xử lý ảnh
-import tensorflow as tf  # Sử dụng TensorFlow
-from io import BytesIO
 import numpy as np
 import pandas as pd
 from sklearn.neighbors import NearestNeighbors
@@ -9,19 +7,19 @@ from sklearn.preprocessing import StandardScaler
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.pipeline import Pipeline
 from flask_cors import CORS
+import joblib  # Thư viện để load mô hình đã huấn luyện
 
 app = Flask(__name__)
 # Them cors vao flask app
 CORS(app)
-# Tải mô hình đã huấn luyện
-model_path = "model/base_model_trained.h5"
-model = tf.keras.models.load_model(model_path)
 
-# Tai du lieu file csv data recommend40Food
+# Tải mô hình đã huấn luyện cho việc nhận diện
+model_path = "model/knn_model.pkl"  # Đường dẫn tới mô hình KNN đã huấn luyện
+model = joblib.load(model_path)  # Sử dụng joblib để load mô hình
+
+# Tải dữ liệu từ file csv data recommend40Food
 file_path = "data/40FoodRec.csv"
 recipe_df = pd.read_csv(file_path)
-
-print(recipe_df.shape)
 
 # Preprocess Ingredients
 vectorizer = TfidfVectorizer()
@@ -43,7 +41,6 @@ scaler = StandardScaler()
 # Định nghĩa route nhận ảnh
 @app.route("/recognize", methods=["POST"])
 def recognize_image():
-    print("0ke")
     if "file" not in request.files:
         return jsonify({"error": "No file part"}), 400
 
@@ -97,22 +94,18 @@ def recognize_image():
         "Moon Cake",
     ]
 
-    # Chuyển ảnh sang định dạng mà mô hình cần (ví dụ: mảng numpy)
     try:
         image = Image.open(file)
         image_array = preprocess_image(image)  # Hàm xử lý ảnh
 
-        # Thực hiện dự đoán
-        prediction = model.predict(image_array)
+        # Thực hiện dự đoán bằng mô hình KNN
+        prediction = model.predict(image_array)  # Sử dụng mô hình đã được load
 
         # Lấy kết quả dự đoán
-        predicted_class = np.argmax(prediction, axis=1)[0]
+        predicted_class = prediction[0]
 
         # Trả về kết quả dự đoán
-        return jsonify({"prediction": classes[int(predicted_class)]})
-        # print(classes[int(predicted_class)])
-        # print(int(predicted_class))
-        # return jsonify({"prediction": int(predicted_class)})
+        return jsonify({"prediction": classes[predicted_class]})
 
     except Exception as e:
         return jsonify({"error": str(e)}), 500
@@ -122,9 +115,9 @@ def recognize_image():
 @app.route("/recommend", methods=["POST"])
 def recommend_recipes():
     data = request.get_json()
-    print(data)
     input_features = data.get("input_features", {})
     list_ingredients = data.get("list_ingredients", [])
+
     # Construct the model and get valid columns
     knn, valid_columns = construct_model(input_features, list_ingredients)
 
@@ -154,24 +147,20 @@ def recommend_recipes():
 
     # Fetch and return recommendations
     recommendations = recipe_df.iloc[indices[0]]
-    # result = recommendations[["id"]].to_dict(orient="records")
-
-    # return list id recommend food
     result = recommendations["id"].tolist()
     return jsonify(result)
 
 
 def preprocess_image(image):
     """
-    Hàm xử lý ảnh để chuyển đổi từ PIL Image sang mảng numpy phù hợp với mô hình TensorFlow.
+    Hàm xử lý ảnh để chuyển đổi từ PIL Image sang mảng numpy phù hợp với mô hình scikit-learn.
     """
     image = image.resize(
         (224, 224)
     )  # Resize ảnh về kích thước 224x224 (tuỳ theo mô hình yêu cầu)
     image_array = np.array(image)  # Chuyển đổi ảnh sang mảng numpy
     image_array = image_array / 255.0  # Chuẩn hóa giá trị pixel về khoảng [0, 1]
-    image_array = np.expand_dims(image_array, axis=0)  # Thêm batch dimension
-    return image_array
+    return image_array.reshape(1, -1)  # Thay đổi kích thước để phù hợp với mô hình
 
 
 # Function to construct the model by dynamically removing zero-value features
@@ -195,10 +184,12 @@ def construct_model(input_features, list_ingredients):
 
     # Combine the filtered numerical features and the ingredient features
     if X_numerical_filtered.size > 0:
-        X_combined = np.hstack([X_numerical_filtered, X_ingredients.toarray()])
+        X_combined = np.hstack(
+            [X_numerical_filtered, X_ingredients_transformed.toarray()]
+        )
     else:
         X_combined = (
-            X_ingredients.toarray()
+            X_ingredients_transformed.toarray()
         )  # Only ingredients if no numerical features are present
 
     # Re-train the KNN model
