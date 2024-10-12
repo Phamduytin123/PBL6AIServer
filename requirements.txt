@@ -1,0 +1,9 @@
+Flask
+Pillow
+tensorflow
+numpy
+pandas
+SQLAlchemy
+pymysql
+scikit-learn
+flask-cors
