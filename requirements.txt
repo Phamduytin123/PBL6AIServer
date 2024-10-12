@@ -7,3 +7,4 @@ SQLAlchemy
 pymysql
 scikit-learn
 flask-cors
+gunicorn
