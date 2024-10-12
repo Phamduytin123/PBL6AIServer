@@ -5,16 +5,14 @@ import pandas as pd
 from sklearn.neighbors import NearestNeighbors
 from sklearn.preprocessing import StandardScaler
 from sklearn.feature_extraction.text import TfidfVectorizer
-from sklearn.pipeline import Pipeline
 from flask_cors import CORS
 import joblib  # Thư viện để load mô hình đã huấn luyện
 
 app = Flask(__name__)
-# Them cors vao flask app
-CORS(app)
+CORS(app)  # Thêm CORS vào Flask app
 
 # Tải mô hình đã huấn luyện cho việc nhận diện
-model_path = "model/knn_model.pkl"  # Đường dẫn tới mô hình KNN đã huấn luyện
+model_path = "model/base_model_trained.pkl"
 model = joblib.load(model_path)  # Sử dụng joblib để load mô hình
 
 # Tải dữ liệu từ file csv data recommend40Food
@@ -24,15 +22,6 @@ recipe_df = pd.read_csv(file_path)
 # Preprocess Ingredients
 vectorizer = TfidfVectorizer()
 X_ingredients = vectorizer.fit_transform(recipe_df["ingredients_en"])
-
-# Full list of numerical columns
-numerical_columns = [
-    "carbohydrates",
-    "protein",
-    "cholesterol",
-    "sodium",
-    "fiber",
-]
 
 # Normalize numerical features
 scaler = StandardScaler()
@@ -98,11 +87,11 @@ def recognize_image():
         image = Image.open(file)
         image_array = preprocess_image(image)  # Hàm xử lý ảnh
 
-        # Thực hiện dự đoán bằng mô hình KNN
+        # Thực hiện dự đoán bằng mô hình
         prediction = model.predict(image_array)  # Sử dụng mô hình đã được load
 
         # Lấy kết quả dự đoán
-        predicted_class = prediction[0]
+        predicted_class = np.argmax(prediction, axis=1)[0]  # Dự đoán cho lớp
 
         # Trả về kết quả dự đoán
         return jsonify({"prediction": classes[predicted_class]})
@@ -122,7 +111,7 @@ def recommend_recipes():
     knn, valid_columns = construct_model(input_features, list_ingredients)
 
     # Scale the input numerical features for the valid columns
-    valid_numerical_input = [input_features[col] for col in valid_columns]
+    valid_numerical_input = [input_features.get(col, 0) for col in valid_columns]
 
     if valid_numerical_input:
         input_numerical_scaled = scaler.transform([valid_numerical_input])
@@ -155,12 +144,14 @@ def preprocess_image(image):
     """
     Hàm xử lý ảnh để chuyển đổi từ PIL Image sang mảng numpy phù hợp với mô hình scikit-learn.
     """
-    image = image.resize(
-        (224, 224)
-    )  # Resize ảnh về kích thước 224x224 (tuỳ theo mô hình yêu cầu)
+    image = image.resize((224, 224))  # Resize ảnh về kích thước 224x224
     image_array = np.array(image)  # Chuyển đổi ảnh sang mảng numpy
+    if image_array.ndim == 2:  # Nếu ảnh là grayscale (2D)
+        image_array = np.stack((image_array,) * 3, axis=-1)  # Chuyển thành 3 kênh
     image_array = image_array / 255.0  # Chuẩn hóa giá trị pixel về khoảng [0, 1]
-    return image_array.reshape(1, -1)  # Thay đổi kích thước để phù hợp với mô hình
+    return image_array.reshape(
+        1, 224, 224, 3
+    )  # Thay đổi kích thước để phù hợp với mô hình
 
 
 # Function to construct the model by dynamically removing zero-value features
